@@ -1,0 +1,6 @@
+{
+  "name": "Pohoda XML Generátor Faktur",
+  "description": "Nástroj pro převod XLSX tabulky s kontakty, popisy a částkami na XML importní soubor pro účetní systém Stormware Pohoda.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
