@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { 
   FileCode, 
   Settings, 
@@ -24,77 +24,118 @@ import SampleDownloader from './components/SampleDownloader';
 import { ParsedExcelResult, ColumnMapping, XmlGeneratorSettings } from './types';
 import { generatePohodaXml } from './utils/xmlGenerator';
 
+// Pomocná funkce pro bezpečné získání dnešního data bez ohledu na renderovací cyklus
+const getTodayStr = () => new Date().toISOString().slice(0, 10);
+
 export default function App() {
   const [parsedData, setParsedData] = useState<ParsedExcelResult | null>(null);
   const [activeTab, setActiveTab] = useState<'preview' | 'xml'>('preview');
 
   // Výchozí dnešní datum
   const todayStr = useMemo(() => {
-    return new Date().toISOString().slice(0, 10);
+    return getTodayStr();
   }, []);
 
-  const [mapping, setMapping] = useState<ColumnMapping>({
-    partnerIdCol: '',
-    textCol: '',
-    totalAmountCol: '',
-    invoiceNumberCol: '',
-  });
-
-  const [settings, setSettings] = useState<XmlGeneratorSettings>({
-    myIco: '27082440', // Výchozí ukázkové IČO (např. Stormware)
-    partnerIdType: 'id',
-    vatRate: 'high',
-    vatPercent: 21,
-    dateIssue: todayStr,
-    dateTax: todayStr,
-    dueDays: 14,
-    autoNumbering: true,
-    paymentType: 'převodem',
-  });
-
-  const handleDataParsed = (data: ParsedExcelResult) => {
-    setParsedData(data);
-    
-    // Pokus o automatickou předvolbu mapování
-    const newMapping: ColumnMapping = {
+  // Načtení mapování z lokálního úložiště
+  const [mapping, setMapping] = useState<ColumnMapping>(() => {
+    try {
+      const saved = localStorage.getItem('pohoda_mapping');
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (e) {
+      console.error('Nepodařilo se načíst mapování z localStorage:', e);
+    }
+    return {
       partnerIdCol: '',
       textCol: '',
       totalAmountCol: '',
       invoiceNumberCol: '',
     };
+  });
 
-    data.headers.forEach((h) => {
-      const lower = h.toLowerCase();
-      if (lower.includes('kontakt') || lower.includes('partner') || lower.includes('klient') || lower.includes('id') || lower === 'kód' || lower === 'kod') {
-        newMapping.partnerIdCol = h;
+  // Načtení nastavení z lokálního úložiště
+  const [settings, setSettings] = useState<XmlGeneratorSettings>(() => {
+    try {
+      const saved = localStorage.getItem('pohoda_settings');
+      if (saved) {
+        return JSON.parse(saved);
       }
-      if (lower.includes('popis') || lower.includes('text') || lower.includes('polozka') || lower.includes('název') || lower.includes('nazev')) {
-        newMapping.textCol = h;
-      }
-      if (lower.includes('částka') || lower.includes('castka') || lower.includes('celkem') || lower.includes('cena') || lower.includes('s dph') || lower.includes('včetně dph')) {
-        newMapping.totalAmountCol = h;
-      }
-      if (lower.includes('číslo') || lower.includes('cislo') || lower.includes('faktura') || lower.includes('doklad')) {
-        newMapping.invoiceNumberCol = h;
-      }
-    });
+    } catch (e) {
+      console.error('Nepodařilo se načíst nastavení z localStorage:', e);
+    }
+    return {
+      myIco: '27082440', // Výchozí ukázkové IČO (např. Stormware)
+      partnerIdType: 'id',
+      vatRate: 'high',
+      vatPercent: 21,
+      dateIssue: getTodayStr(),
+      dateTax: getTodayStr(),
+      dueDays: 14,
+      autoNumbering: true,
+      paymentType: 'převodem',
+    };
+  });
 
-    // Pokud se nic neklikne, nastavit aspoň první 3 hlavičky jako fallback
-    if (!newMapping.partnerIdCol && data.headers[0]) newMapping.partnerIdCol = data.headers[0];
-    if (!newMapping.textCol && data.headers[1]) newMapping.textCol = data.headers[1];
-    if (!newMapping.totalAmountCol && data.headers[2]) newMapping.totalAmountCol = data.headers[2];
+  // Automatické ukládání změn do localStorage
+  useEffect(() => {
+    localStorage.setItem('pohoda_mapping', JSON.stringify(mapping));
+  }, [mapping]);
+
+  useEffect(() => {
+    localStorage.setItem('pohoda_settings', JSON.stringify(settings));
+  }, [settings]);
+
+  const handleDataParsed = (data: ParsedExcelResult) => {
+    setParsedData(data);
+    
+    // Nejprve zkusíme zachovat naposledy použité sloupce, pokud v novém souboru reálně existují
+    const newMapping: ColumnMapping = {
+      partnerIdCol: mapping.partnerIdCol && data.headers.includes(mapping.partnerIdCol) ? mapping.partnerIdCol : '',
+      textCol: mapping.textCol && data.headers.includes(mapping.textCol) ? mapping.textCol : '',
+      totalAmountCol: mapping.totalAmountCol && data.headers.includes(mapping.totalAmountCol) ? mapping.totalAmountCol : '',
+      invoiceNumberCol: mapping.invoiceNumberCol && data.headers.includes(mapping.invoiceNumberCol) ? mapping.invoiceNumberCol : '',
+    };
+
+    // Pokud některý sloupec nebyl zachován z předchozího mapování, detekujeme ho pomocí klíčových slov
+    if (!newMapping.partnerIdCol) {
+      const found = data.headers.find((h) => {
+        const lower = h.toLowerCase();
+        return lower.includes('kontakt') || lower.includes('partner') || lower.includes('klient') || lower.includes('id') || lower === 'kód' || lower === 'kod';
+      });
+      newMapping.partnerIdCol = found || data.headers[0] || '';
+    }
+
+    if (!newMapping.textCol) {
+      const found = data.headers.find((h) => {
+        const lower = h.toLowerCase();
+        return lower.includes('popis') || lower.includes('text') || lower.includes('polozka') || lower.includes('název') || lower.includes('nazev');
+      });
+      newMapping.textCol = found || data.headers[1] || '';
+    }
+
+    if (!newMapping.totalAmountCol) {
+      const found = data.headers.find((h) => {
+        const lower = h.toLowerCase();
+        return lower.includes('částka') || lower.includes('castka') || lower.includes('celkem') || lower.includes('cena') || lower.includes('s dph') || lower.includes('včetně dph');
+      });
+      newMapping.totalAmountCol = found || data.headers[2] || '';
+    }
+
+    if (!newMapping.invoiceNumberCol) {
+      const found = data.headers.find((h) => {
+        const lower = h.toLowerCase();
+        return lower.includes('číslo') || lower.includes('cislo') || lower.includes('faktura') || lower.includes('doklad');
+      });
+      newMapping.invoiceNumberCol = found || '';
+    }
 
     setMapping(newMapping);
   };
 
   const handleReset = () => {
     setParsedData(null);
-    setMapping({
-      partnerIdCol: '',
-      textCol: '',
-      totalAmountCol: '',
-      invoiceNumberCol: '',
-    });
+    // Nyní již neresetujeme 'mapping' na prázdný objekt, čímž uchováme poslední použité mapování sloupečků
   };
 
   // Validace mapování před generováním
