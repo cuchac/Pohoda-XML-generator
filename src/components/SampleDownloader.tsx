@@ -12,27 +12,35 @@ export default function SampleDownloader() {
     const data = [
       {
         'ID kontaktu': 10024,
-        'Název firmy / Popis plnění': 'Komplexní marketingové služby za červen',
+        'Popis na faktuře': 'Marketingové služby za 06/2026',
+        'Popis položky': 'Komplexní správa sociálních sítí a PPC kampaní',
         'Celková částka s DPH': 15000,
         'Číslo faktury (volitelné)': 'FA2026001',
+        'Přenesená daň (PDP)': 'Ne',
       },
       {
         'ID kontaktu': 'EXT-998',
-        'Název firmy / Popis plnění': 'Konzultace a vývoj mobilní aplikace s.r.o.',
+        'Popis na faktuře': 'Vývoj nového webu',
+        'Popis položky': 'Kódování frontend části a nasazení CMS systému',
         'Celková částka s DPH': 24200,
         'Číslo faktury (volitelné)': 'FA2026002',
+        'Přenesená daň (PDP)': 'Ano',
       },
       {
         'ID kontaktu': 'CODE_ALFA',
-        'Název firmy / Popis plnění': 'Pravidelná údržba serverové infrastruktury',
+        'Popis na faktuře': 'Technická správa serverů',
+        'Popis položky': 'Pravidelná údržba serverové infrastruktury',
         'Celková částka s DPH': 4840,
         'Číslo faktury (volitelné)': '',
+        'Přenesená daň (PDP)': 'Ne',
       },
       {
         'ID kontaktu': 10055,
-        'Název firmy / Popis plnění': 'Grafické práce - tvorba nového vizuálního stylu',
+        'Popis na faktuře': 'Grafické práce',
+        'Popis položky': 'Tvorba nového firemního vizuálního stylu a logomanuálu',
         'Celková částka s DPH': 8500,
         'Číslo faktury (volitelné)': 'FA2026003',
+        'Přenesená daň (PDP)': 'Ano',
       },
     ];
 

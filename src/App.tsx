@@ -41,16 +41,31 @@ export default function App() {
     try {
       const saved = localStorage.getItem('pohoda_mapping');
       if (saved) {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        // Migrace ze staré struktury (s textCol) na novou (s invoiceTextCol a itemTextCol)
+        if (parsed.textCol && !parsed.invoiceTextCol && !parsed.itemTextCol) {
+          parsed.invoiceTextCol = parsed.textCol;
+          parsed.itemTextCol = parsed.textCol;
+        }
+        return {
+          partnerIdCol: parsed.partnerIdCol || '',
+          invoiceTextCol: parsed.invoiceTextCol || '',
+          itemTextCol: parsed.itemTextCol || '',
+          totalAmountCol: parsed.totalAmountCol || '',
+          invoiceNumberCol: parsed.invoiceNumberCol || '',
+          pdpCol: parsed.pdpCol || '',
+        };
       }
     } catch (e) {
       console.error('Nepodařilo se načíst mapování z localStorage:', e);
     }
     return {
       partnerIdCol: '',
-      textCol: '',
+      invoiceTextCol: '',
+      itemTextCol: '',
       totalAmountCol: '',
       invoiceNumberCol: '',
+      pdpCol: '',
     };
   });
 
@@ -59,7 +74,20 @@ export default function App() {
     try {
       const saved = localStorage.getItem('pohoda_settings');
       if (saved) {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        return {
+          myIco: parsed.myIco || '27082440', // Výchozí ukázkové IČO (např. Stormware)
+          partnerIdType: parsed.partnerIdType || 'id',
+          vatRate: parsed.vatRate || 'high',
+          vatPercent: typeof parsed.vatPercent === 'number' ? parsed.vatPercent : 21,
+          dateIssue: parsed.dateIssue || getTodayStr(),
+          dateTax: parsed.dateTax || getTodayStr(),
+          dueDays: typeof parsed.dueDays === 'number' ? parsed.dueDays : 14,
+          autoNumbering: parsed.autoNumbering !== undefined ? parsed.autoNumbering : true,
+          paymentType: parsed.paymentType || 'převodem',
+          defaultPdp: parsed.defaultPdp !== undefined ? parsed.defaultPdp : false,
+          pdpClassification: parsed.pdpClassification || 'UDpdp',
+        };
       }
     } catch (e) {
       console.error('Nepodařilo se načíst nastavení z localStorage:', e);
@@ -74,6 +102,8 @@ export default function App() {
       dueDays: 14,
       autoNumbering: true,
       paymentType: 'převodem',
+      defaultPdp: false,
+      pdpClassification: 'UDpdp',
     };
   });
 
@@ -92,9 +122,11 @@ export default function App() {
     // Nejprve zkusíme zachovat naposledy použité sloupce, pokud v novém souboru reálně existují
     const newMapping: ColumnMapping = {
       partnerIdCol: mapping.partnerIdCol && data.headers.includes(mapping.partnerIdCol) ? mapping.partnerIdCol : '',
-      textCol: mapping.textCol && data.headers.includes(mapping.textCol) ? mapping.textCol : '',
+      invoiceTextCol: mapping.invoiceTextCol && data.headers.includes(mapping.invoiceTextCol) ? mapping.invoiceTextCol : '',
+      itemTextCol: mapping.itemTextCol && data.headers.includes(mapping.itemTextCol) ? mapping.itemTextCol : '',
       totalAmountCol: mapping.totalAmountCol && data.headers.includes(mapping.totalAmountCol) ? mapping.totalAmountCol : '',
       invoiceNumberCol: mapping.invoiceNumberCol && data.headers.includes(mapping.invoiceNumberCol) ? mapping.invoiceNumberCol : '',
+      pdpCol: mapping.pdpCol && data.headers.includes(mapping.pdpCol) ? mapping.pdpCol : '',
     };
 
     // Pokud některý sloupec nebyl zachován z předchozího mapování, detekujeme ho pomocí klíčových slov
@@ -106,12 +138,28 @@ export default function App() {
       newMapping.partnerIdCol = found || data.headers[0] || '';
     }
 
-    if (!newMapping.textCol) {
+    if (!newMapping.invoiceTextCol) {
       const found = data.headers.find((h) => {
         const lower = h.toLowerCase();
-        return lower.includes('popis') || lower.includes('text') || lower.includes('polozka') || lower.includes('název') || lower.includes('nazev');
+        return (lower.includes('popis') && (lower.includes('fakt') || lower.includes('hlav'))) || lower.includes('název dokladu') || lower.includes('nazev dokladu');
       });
-      newMapping.textCol = found || data.headers[1] || '';
+      if (found) {
+        newMapping.invoiceTextCol = found;
+      } else {
+        const generalDesc = data.headers.find((h) => {
+          const lower = h.toLowerCase();
+          return lower.includes('popis') || lower.includes('text') || lower.includes('polozka') || lower.includes('název') || lower.includes('nazev');
+        });
+        newMapping.invoiceTextCol = generalDesc || data.headers[1] || '';
+      }
+    }
+
+    if (!newMapping.itemTextCol) {
+      const found = data.headers.find((h) => {
+        const lower = h.toLowerCase();
+        return (lower.includes('popis') && (lower.includes('poloz') || lower.includes('art'))) || lower.includes('popis zboží') || lower.includes('popis zbozi');
+      });
+      newMapping.itemTextCol = found || newMapping.invoiceTextCol;
     }
 
     if (!newMapping.totalAmountCol) {
@@ -130,19 +178,27 @@ export default function App() {
       newMapping.invoiceNumberCol = found || '';
     }
 
+    if (!newMapping.pdpCol) {
+      const found = data.headers.find((h) => {
+        const lower = h.toLowerCase();
+        return lower.includes('přenesená') || lower.includes('prenesena') || lower.includes('pdp') || lower.includes('daňová povinnost') || lower.includes('danova povinnost') || lower === 'přenesená daň' || lower === 'pdp_rezim';
+      });
+      newMapping.pdpCol = found || '';
+    }
+
     setMapping(newMapping);
   };
 
   const handleReset = () => {
     setParsedData(null);
-    // Nyní již neresetujeme 'mapping' na prázdný objekt, čímž uchováme poslední použité mapování sloupečků
   };
 
   // Validace mapování před generováním
   const isMappingValid = useMemo(() => {
     return (
       mapping.partnerIdCol !== '' &&
-      mapping.textCol !== '' &&
+      mapping.invoiceTextCol !== '' &&
+      mapping.itemTextCol !== '' &&
       mapping.totalAmountCol !== ''
     );
   }, [mapping]);
@@ -356,9 +412,11 @@ export default function App() {
                           {parsedData.headers.map((header) => {
                             const isMapped = 
                               header === mapping.partnerIdCol || 
-                              header === mapping.textCol || 
+                              header === mapping.invoiceTextCol || 
+                              header === mapping.itemTextCol || 
                               header === mapping.totalAmountCol ||
-                              header === mapping.invoiceNumberCol;
+                              header === mapping.invoiceNumberCol ||
+                              header === mapping.pdpCol;
                             return (
                               <th 
                                 key={header} 
@@ -370,14 +428,20 @@ export default function App() {
                                 {header === mapping.partnerIdCol && (
                                   <span className="ml-1.5 inline-block text-[10px] bg-sky-100 text-sky-800 px-1.5 py-0.5 rounded font-bold">ID partnera</span>
                                 )}
-                                {header === mapping.textCol && (
-                                  <span className="ml-1.5 inline-block text-[10px] bg-sky-100 text-sky-800 px-1.5 py-0.5 rounded font-bold">Popis</span>
+                                {header === mapping.invoiceTextCol && (
+                                  <span className="ml-1.5 inline-block text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-bold">Popis FA</span>
+                                )}
+                                {header === mapping.itemTextCol && (
+                                  <span className="ml-1.5 inline-block text-[10px] bg-pink-100 text-pink-800 px-1.5 py-0.5 rounded font-bold">Popis položky</span>
                                 )}
                                 {header === mapping.totalAmountCol && (
-                                  <span className="ml-1.5 inline-block text-[10px] bg-sky-100 text-sky-800 px-1.5 py-0.5 rounded font-bold">Suma s DPH</span>
+                                  <span className="ml-1.5 inline-block text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold">Suma s DPH</span>
                                 )}
                                 {header === mapping.invoiceNumberCol && (
-                                  <span className="ml-1.5 inline-block text-[10px] bg-sky-100 text-sky-800 px-1.5 py-0.5 rounded font-bold">Číslo FA</span>
+                                  <span className="ml-1.5 inline-block text-[10px] bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded font-bold">Číslo FA</span>
+                                )}
+                                {header === mapping.pdpCol && (
+                                  <span className="ml-1.5 inline-block text-[10px] bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded font-bold">PDP</span>
                                 )}
                               </th>
                             );
@@ -393,9 +457,11 @@ export default function App() {
                             {parsedData.headers.map((header) => {
                               const isMapped = 
                                 header === mapping.partnerIdCol || 
-                                header === mapping.textCol || 
+                                header === mapping.invoiceTextCol || 
+                                header === mapping.itemTextCol || 
                                 header === mapping.totalAmountCol ||
-                                header === mapping.invoiceNumberCol;
+                                header === mapping.invoiceNumberCol ||
+                                header === mapping.pdpCol;
                               return (
                                 <td 
                                   key={header} 

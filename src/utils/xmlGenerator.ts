@@ -44,9 +44,17 @@ export function generatePohodaXml(
     const partnerIdRaw = row[mapping.partnerIdCol];
     const partnerId = partnerIdRaw !== undefined && partnerIdRaw !== null ? String(partnerIdRaw).trim() : '';
 
-    // Získání a ošetření textu
-    const textRaw = row[mapping.textCol];
-    const text = textRaw !== undefined && textRaw !== null ? String(textRaw).trim() : 'Fakturace';
+    // Získání a ošetření samostatného popisu faktury versus popisu položky
+    const invoiceTextRaw = row[mapping.invoiceTextCol];
+    const itemTextRaw = row[mapping.itemTextCol];
+
+    const invoiceText = invoiceTextRaw !== undefined && invoiceTextRaw !== null 
+      ? String(invoiceTextRaw).trim() 
+      : (itemTextRaw !== undefined && itemTextRaw !== null ? String(itemTextRaw).trim() : 'Fakturace');
+
+    const itemText = itemTextRaw !== undefined && itemTextRaw !== null 
+      ? String(itemTextRaw).trim() 
+      : invoiceText;
 
     // Získání a ošetření částky
     const amountRaw = row[mapping.totalAmountCol];
@@ -57,6 +65,20 @@ export function generatePohodaXml(
       // pokus o parsování, odstranění mezer, převod čárky na tečku
       const cleaned = String(amountRaw).replace(/\s/g, '').replace(/,/g, '.');
       totalAmount = parseFloat(cleaned) || 0;
+    }
+
+    // Zjištění Přenesené daňové povinnosti (PDP) pro tento řádek
+    let isPdp = settings.defaultPdp;
+    if (mapping.pdpCol) {
+      const pdpRaw = row[mapping.pdpCol];
+      if (pdpRaw !== undefined && pdpRaw !== null) {
+        const pdpStr = String(pdpRaw).trim().toLowerCase();
+        if (pdpStr === 'ano' || pdpStr === 'yes' || pdpStr === '1' || pdpStr === 'true' || pdpStr === 'pdp' || pdpStr === '✓' || pdpStr === 'x') {
+          isPdp = true;
+        } else if (pdpStr === 'ne' || pdpStr === 'no' || pdpStr === '0' || pdpStr === 'false') {
+          isPdp = false;
+        }
+      }
     }
 
     // Volitelné číslo dokladu
@@ -77,7 +99,11 @@ export function generatePohodaXml(
     let priceWithoutVat = totalAmount;
     let vatAmount = 0;
 
-    if (settings.vatRate === 'high') {
+    if (isPdp) {
+      rateVatXml = 'pdp';
+      priceWithoutVat = totalAmount;
+      vatAmount = 0;
+    } else if (settings.vatRate === 'high') {
       rateVatXml = 'high';
       const divisor = 1 + (settings.vatPercent / 100);
       priceWithoutVat = Math.round((totalAmount / divisor) * 100) / 100;
@@ -136,24 +162,31 @@ export function generatePohodaXml(
         <inv:date>${formatDate(settings.dateIssue)}</inv:date>
         <inv:dateTax>${formatDate(settings.dateTax)}</inv:dateTax>
         <inv:dateDue>${dateDueStr}</inv:dateDue>
-        <inv:text>${escapeXml(text)}</inv:text>${partnerIdentityXml}
+        <inv:text>${escapeXml(invoiceText)}</inv:text>${partnerIdentityXml}
         <inv:paymentType>${paymentTypeEscaped}</inv:paymentType>
         <inv:account>
           <typ:ids>KB</typ:ids>
-        </inv:account>
+        </inv:account>${isPdp ? `
+        <inv:classificationVAT>
+          <typ:ids>${escapeXml(settings.pdpClassification || 'UDpdp')}</typ:ids>
+        </inv:classificationVAT>` : ''}
       </inv:invoiceHeader>
       <inv:invoiceDetail>
         <inv:invoiceItem>
-          <inv:text>${escapeXml(text)}</inv:text>
+          <inv:text>${escapeXml(itemText)}</inv:text>
           <inv:quantity>1</inv:quantity>
           <inv:rateVAT>${rateVatXml}</inv:rateVAT>
           <inv:homeCurrency>
             <typ:unitPrice>${priceWithoutVat.toFixed(2)}</typ:unitPrice>
             <typ:price>${priceWithoutVat.toFixed(2)}</typ:price>`;
             
-    if (rateVatXml !== 'none') {
+    if (rateVatXml !== 'none' && rateVatXml !== 'pdp') {
       xml += `
             <typ:priceVAT>${vatAmount.toFixed(2)}</typ:priceVAT>
+            <typ:priceWithVAT>${totalAmount.toFixed(2)}</typ:priceWithVAT>`;
+    } else if (rateVatXml === 'pdp' || rateVatXml === 'none') {
+      // Pro PDP nebo Osvobozené se DPH na faktuře nevyčísluje, takže celková částka s DPH je rovna základu
+      xml += `
             <typ:priceWithVAT>${totalAmount.toFixed(2)}</typ:priceWithVAT>`;
     }
     
